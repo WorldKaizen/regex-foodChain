@@ -1,118 +1,75 @@
-import { useLazyQuery } from '@apollo/react-hooks';
 import React, { useEffect } from "react";
-import CartItem from '../CartItem';
-import Auth from '../../utils/auth';
-import './style.css';
-import { useStoreContext } from '../../utils/GlobalState';
-import { TOGGLE_CART, ADD_MULTIPLE_TO_CART } from "../../utils/actions";
+import { useQuery } from '@apollo/react-hooks';
 import { idbPromise } from "../../utils/helpers";
-import { QUERY_CHECKOUT } from '../../utils/queries';
-import { loadStripe } from '@stripe/stripe-js';
+import ProductItem from "../ProductItem";
+import { useStoreContext } from "../../utils/GlobalState";
+import { UPDATE_PRODUCTS } from "../../utils/actions";
+import { QUERY_PRODUCTS } from "../../utils/queries";
+import spinner from "../../assets/spinner.gif"
 
-const stripePromise = loadStripe('pk_test_TYooMQauvdEDq54NiTphI7jx');
+function ProductList() {
+  const [state, dispatch] = useStoreContext();
 
-const Cart = () => {
+  const { currentCategory } = state;
 
-    const [state, dispatch] = useStoreContext();
-    const [getCheckout, { data }] = useLazyQuery(QUERY_CHECKOUT);
+  const { loading, data } = useQuery(QUERY_PRODUCTS);
 
-    useEffect(() => {
-        async function getCart() {
-          const cart = await idbPromise('cart', 'get');
-          dispatch({ type: ADD_MULTIPLE_TO_CART, products: [...cart] });
-        };
-      
-        if (!state.cart.length) {
-          getCart();
-        }
-    }, [state.cart.length, dispatch]);
+  useEffect(() => {
+    if(data) {
+      dispatch({
+        type: UPDATE_PRODUCTS,
+        products: data.products
+      });
+  
+      data.products.forEach((product) => {
+        idbPromise('products', 'put', product);
+      });
+      // add else if to check if `loading` is undefined in `useQuery()` Hook
+    } else if (!loading) {
+      // since we're offline, get all of the data from the `products` store
+      idbPromise('products', 'get').then((products) => {
+        // use retrieved data to set global state for offline browsing
+        dispatch({
+          type: UPDATE_PRODUCTS,
+          products: products
+        });
+      });
+    }
+  }, [data, loading, dispatch]);
 
-    // stripe useEffect()
-    useEffect(() => {
-        if (data) {
-          stripePromise.then((res) => {
-            res.redirectToCheckout({ sessionId: data.checkout.session });
-          });
-        }
-      }, [data]);
-
-    function toggleCart() {
-        dispatch({ type: TOGGLE_CART });
-
+  function filterProducts() {
+    if (!currentCategory) {
+      return state.products;
     }
 
-    function calculateTotal() {
-        let sum = 0;
-        state.cart.forEach(item => {
-            sum += item.price * item.purchaseQuantity;
-        });
-        return sum.toFixed(2);
-    }
-
-    function submitCheckout() {
-        const productIds = [];
-      
-        state.cart.forEach((item) => {
-          for (let i = 0; i < item.purchaseQuantity; i++) {
-            productIds.push(item._id);
-          }
-        });
-
-        getCheckout({
-            variables: { products: productIds }
-        });
-    }
-
-if (!state.cartOpen) {
-    return (
-
-      <div className="fixed-action-btn" onClick={toggleCart}>
-        <a className="btn-floating btn-large amber darken-3 pulse">
-          <i className="large material-icons">shopping_cart</i>
-        </a>
-      </div>
-      
-    );
+    return state.products.filter(product => product.category._id === currentCategory);
   }
 
   return (
-    <div className="cart">
-        <div className="close" onClick={toggleCart}>
-            <a className="waves-effect waves-light btn red">
-                <i className="medium material-icons right white-text">chevron_right</i>
-                BACK
-            </a>
-        </div>
-        <p>Your Cart:</p>
-        {state.cart.length ? (
-            <div>
-                {state.cart.map(item => (
-                    <CartItem key={item._id} item={item} />
-                ))}
-                <div className="row">
-                    <div className="col s6">
-                        <strong>Total: ${calculateTotal()}</strong>
-                        
-                    </div>
-                    <div className="col s6">
-                        {
-                        Auth.loggedIn() ?
-                        <button className="waves-effect waves-light green btn" onClick={submitCheckout}>
-                          Checkout
-                        </button>
-                        :
-                        <span>(log in to check out)</span>
-                        }
-                    </div>
-                </div>
-            </div>
-        ) : (
-            <p>
-              is Empty
-            </p>
-        )}
-    </div>
-  );
-};
+    <div className="row">
 
-export default Cart;
+          {state.products.length ? (
+            <div className="row">
+                {filterProducts().map(product => (
+                    <ProductItem
+                      key= {product._id}
+                      _id={product._id}
+                      image={product.image}
+                      name={product.name}
+                      price={product.price}
+                      quantity={product.quantity}
+                    />
+                ))}
+            </div>
+
+      ) : (
+        <h3>You haven't added any products yet!</h3>
+      )}
+      { loading ? 
+      <img src={spinner} alt="loading" />: null}
+    </div>
+
+  );
+}
+
+export default ProductList;
